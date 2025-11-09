@@ -247,7 +247,7 @@ class TianqiClient:
                 name='alarms',
                 config_entry=self.entry,
                 update_method=self.update_alarms,
-                update_interval=timedelta(minutes=5),
+                update_interval=timedelta(minutes=15),
             ),
             DataUpdateCoordinator(
                 hass, _LOGGER,
@@ -282,7 +282,7 @@ class TianqiClient:
                 name='minutely',
                 config_entry=self.entry,
                 update_method=self.update_minutely,
-                update_interval=timedelta(minutes=2),
+                update_interval=timedelta(minutes=30),
             ),
         ]
         self._remove_listeners = []
@@ -558,7 +558,7 @@ class TianqiClient:
 
         return self.data
 
-    @aiohttp_retry()
+    @aiohttp_retry(max_retries  = 2, backoff_factor = 10.0)
     async def update_alarms(self, **kwargs):
         api = self.api_url('dingzhi/%s.html' % kwargs.get('area_id', self.area_id))
         res = await self.http.get(api, allow_redirects=False, verify_ssl=False)
@@ -610,7 +610,7 @@ class TianqiClient:
 
         return self.data
 
-    @aiohttp_retry()
+    @aiohttp_retry(max_retries = 2, backoff_factor = 10.0, retry_on_status = {})
     async def update_minutely(self, **kwargs):
         api = self.api_url('webgis_rain_new/webgis/minute', 'd3')
         pms = {
@@ -625,8 +625,19 @@ class TianqiClient:
             self.data['minutely_text'] = txt
         else:
             self.data.pop('minutely_text', None)
+            
+        # 安全地解析 JSON
+        try:
+            parsed_data = json.loads(txt)
+            if isinstance(parsed_data, dict):
+                self.data['minutely'] = parsed_data
+            else:
+                self.data['minutely'] = {}
+        except json.JSONDecodeError as e:
+            _LOGGER.warning("Failed to parse JSON for func update_minutely. Response: %s", txt[:100])
+            self.data['minutely'] = {}
+            self.data['minutely_text'] = txt
 
-        self.data['minutely'] = json.loads(txt) or {}
         self.push_state(self.decode(self.data['minutely']))
 
         return self.data
